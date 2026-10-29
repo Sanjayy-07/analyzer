@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee
+         https://jakarta.ee/xml/ns/jakartaee/web-app_6_0.xsd"
+         version="6.0">
+
+    <display-name>AI-Powered Architecture Refactoring Analyzer</display-name>
+
+    <!-- ================= J2EE / Module 2: application lifecycle listener ================= -->
+    <listener>
+        <listener-class>com.archanalyzer.web.config.AppContextListener</listener-class>
+    </listener>
+
+    <!-- ================= Module 3: Servlets ================= -->
+    <servlet>
+        <servlet-name>UploadServlet</servlet-name>
+        <servlet-class>com.archanalyzer.web.servlet.UploadServlet</servlet-class>
+        <multipart-config>
+            <max-file-size>209715200</max-file-size>      <!-- 200 MB -->
+            <max-request-size>209715200</max-request-size>
+            <file-size-threshold>1048576</file-size-threshold>
+        </multipart-config>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>UploadServlet</servlet-name>
+        <url-pattern>/projects/upload</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>ProjectDashboardServlet</servlet-name>
+        <servlet-class>com.archanalyzer.web.servlet.ProjectDashboardServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>ProjectDashboardServlet</servlet-name>
+        <url-pattern>/dashboard</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>AnalysisApiServlet</servlet-name>
+        <servlet-class>com.archanalyzer.web.servlet.AnalysisApiServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>AnalysisApiServlet</servlet-name>
+        <url-pattern>/api/projects/*</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>DownloadServlet</servlet-name>
+        <servlet-class>com.archanalyzer.web.servlet.DownloadServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>DownloadServlet</servlet-name>
+        <url-pattern>/projects/download/*</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>LoginServlet</servlet-name>
+        <servlet-class>com.archanalyzer.web.servlet.LoginServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>LoginServlet</servlet-name>
+        <url-pattern>/login</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>WhatIfSimulatorServlet</servlet-name>
+        <servlet-class>com.archanalyzer.web.servlet.WhatIfSimulatorServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>WhatIfSimulatorServlet</servlet-name>
+        <url-pattern>/simulator</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>WhatIfSimulatorServlet</servlet-name>
+        <url-pattern>/simulator/*</url-pattern>
+    </servlet-mapping>
+
+    <!-- ================= Spring MVC DispatcherServlet (Module 6) ================= -->
+    <servlet>
+        <servlet-name>spring-mvc</servlet-name>
+        <servlet-class>org.springframework.web.servlet.DispatcherServlet</servlet-class>
+        <init-param>
+            <param-name>contextClass</param-name>
+            <param-value>org.springframework.web.context.support.AnnotationConfigWebApplicationContext</param-value>
+        </init-param>
+        <init-param>
+            <param-name>contextConfigLocation</param-name>
+            <param-value>com.archanalyzer.web.config.SpringMvcConfig</param-value>
+        </init-param>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>spring-mvc</servlet-name>
+        <url-pattern>/mvc/*</url-pattern>
+    </servlet-mapping>
+
+    <!-- ================= Module 3: Filter (session/auth check) ================= -->
+    <filter>
+        <filter-name>AuthenticationFilter</filter-name>
+        <filter-class>com.archanalyzer.web.filter.AuthenticationFilter</filter-class>
+    </filter>
+    <filter-mapping>
+        <filter-name>AuthenticationFilter</filter-name>
+        <url-pattern>/dashboard</url-pattern>
+    </filter-mapping>
+    <filter-mapping>
+        <filter-name>AuthenticationFilter</filter-name>
+        <url-pattern>/projects/*</url-pattern>
+    </filter-mapping>
+    <filter-mapping>
+        <filter-name>AuthenticationFilter</filter-name>
+        <url-pattern>/simulator</url-pattern>
+    </filter-mapping>
+    <filter-mapping>
+        <filter-name>AuthenticationFilter</filter-name>
+        <url-pattern>/simulator/*</url-pattern>
+    </filter-mapping>
+
+    <!-- ================= Session configuration (Module 3: session tracking) ================= -->
+    <session-config>
+        <session-timeout>30</session-timeout>
+        <cookie-config>
+            <http-only>true</http-only>
+        </cookie-config>
+        <tracking-mode>COOKIE</tracking-mode>
+    </session-config>
+
+    <welcome-file-list>
+        <welcome-file>index.jsp</welcome-file>
+    </welcome-file-list>
+
+    <error-page>
+        <error-code>500</error-code>
+        <location>/WEB-INF/jsp/error.jsp</location>
+    </error-page>
+    <error-page>
+        <error-code>404</error-code>
+        <location>/WEB-INF/jsp/error.jsp</location>
+    </error-page>
+</web-app>
