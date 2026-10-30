@@ -1,4 +1,4 @@
-<%@ page contentType="text/html;charset=UTF-8" language="java" %>
+<%@ page contentType="text/html;charset=UTF-8" language="java" isELIgnored="true" %>
 <%@ page import="com.archanalyzer.pipeline.AnalyzerPipeline" %>
 <%@ page import="com.archanalyzer.ml.RiskPrediction" %>
 <%@ page import="com.archanalyzer.optimization.ArchitectureCandidate" %>
@@ -107,7 +107,7 @@
     <div class="warn-banner">
         <strong>Parse Warnings/Errors:</strong> <%= result.model.getParseErrors().size() %> Java source file(s) had syntax or parsing warnings:
         <ul style="margin:6px 0 0 20px;padding:0">
-            <% for (var entry : result.model.getParseErrors().entrySet()) { %>
+            <% for (Map.Entry<String, String> entry : result.model.getParseErrors().entrySet()) { %>
                 <li><code><%= entry.getKey() %></code>: <%= entry.getValue() %></li>
             <% } %>
         </ul>

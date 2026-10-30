@@ -1,4 +1,4 @@
-<%@ page contentType="text/html;charset=UTF-8" language="java" %>
+<%@ page contentType="text/html;charset=UTF-8" language="java" isELIgnored="true" %>
 <%@ page import="com.archanalyzer.pipeline.AnalyzerPipeline" %>
 <%@ page import="com.archanalyzer.model.ProjectModel" %>
 <%@ page import="java.util.*" %>

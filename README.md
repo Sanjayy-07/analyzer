@@ -136,7 +136,7 @@ export $(cat .env | xargs)   # or configure these in your servlet container
 ```
 Deploy `webapp/target/archanalyzer.war` to Tomcat 10+ (Jakarta EE 9+
 namespace) or run via `mvn tomcat10:run` if you add the Tomcat Maven
-plugin. Then visit `http://localhost:8080/archanalyzer/`.
+plugin. Then visit `http://localhost:8085/archanalyzer/`.
 
 Demo login: `demo` / `demo123` (see `LoginServlet` — replace with real
 password hashing before any real deployment).

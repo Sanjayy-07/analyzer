@@ -118,13 +118,13 @@ public class BuildValidator {
         Path pomPath = projectRoot.resolve("pom.xml");
         Path mavenDir = projectRoot;
         if (!Files.exists(pomPath)) {
-            try (Stream<Path> list = Files.list(projectRoot)) {
-                for (Path p : list.filter(Files::isDirectory).toList()) {
-                    if (Files.exists(p.resolve("pom.xml"))) {
-                        mavenDir = p;
-                        pomPath = p.resolve("pom.xml");
-                        break;
-                    }
+            try (Stream<Path> walk = Files.walk(projectRoot, 5)) {
+                Optional<Path> found = walk
+                    .filter(p -> p.getFileName() != null && p.getFileName().toString().equalsIgnoreCase("pom.xml"))
+                    .findFirst();
+                if (found.isPresent()) {
+                    pomPath = found.get();
+                    mavenDir = pomPath.getParent();
                 }
             } catch (IOException ignored) {}
         }
@@ -172,6 +172,8 @@ public class BuildValidator {
             if (exitCode == 0) {
                 result.testsExecuted = true;
                 result.testsPassed = true;
+                result.status = Status.PASS;
+                result.errors.clear();
                 result.buildToolUsed = "Maven CLI (mvn test-compile)";
                 result.testSummary = "Maven build verified successfully (test-compile passed).";
             } else {

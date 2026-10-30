@@ -156,35 +156,32 @@ public class ProjectDiscovery {
     }
 
     private void detectBuildTools(Path projectRoot, ProjectModel model) {
-        // Maven
-        if (Files.exists(projectRoot.resolve("pom.xml"))) {
-            model.putBuildInfo("buildTool", "maven");
-        } else if (Files.exists(projectRoot.resolve("build.gradle")) || Files.exists(projectRoot.resolve("build.gradle.kts"))) {
-            model.putBuildInfo("buildTool", "gradle");
-        } else if (Files.exists(projectRoot.resolve("package.json"))) {
-            model.putBuildInfo("buildTool", "npm");
-        } else if (Files.exists(projectRoot.resolve("requirements.txt")) || Files.exists(projectRoot.resolve("pyproject.toml"))) {
-            model.putBuildInfo("buildTool", "pip/poetry");
-        } else {
-            // Check immediate child directories
-            try (Stream<Path> list = Files.list(projectRoot)) {
-                for (Path child : list.filter(Files::isDirectory).toList()) {
-                    if (Files.exists(child.resolve("pom.xml"))) {
-                        model.putBuildInfo("buildTool", "maven");
-                        return;
-                    }
-                    if (Files.exists(child.resolve("build.gradle")) || Files.exists(child.resolve("build.gradle.kts"))) {
-                        model.putBuildInfo("buildTool", "gradle");
-                        return;
-                    }
-                    if (Files.exists(child.resolve("package.json"))) {
-                        model.putBuildInfo("buildTool", "npm");
-                        return;
-                    }
+        try (Stream<Path> walk = Files.walk(projectRoot, 5)) {
+            List<Path> files = walk.filter(Files::isRegularFile).toList();
+            for (Path f : files) {
+                String fn = f.getFileName().toString().toLowerCase();
+                if (fn.equals("pom.xml")) {
+                    model.putBuildInfo("buildTool", "maven");
+                    return;
                 }
-            } catch (IOException ignored) {}
-            model.putBuildInfo("buildTool", "unknown");
-        }
+            }
+            for (Path f : files) {
+                String fn = f.getFileName().toString().toLowerCase();
+                if (fn.equals("build.gradle") || fn.equals("build.gradle.kts")) {
+                    model.putBuildInfo("buildTool", "gradle");
+                    return;
+                }
+                if (fn.equals("package.json")) {
+                    model.putBuildInfo("buildTool", "npm");
+                    return;
+                }
+                if (fn.equals("requirements.txt") || fn.equals("pyproject.toml")) {
+                    model.putBuildInfo("buildTool", "pip/poetry");
+                    return;
+                }
+            }
+        } catch (IOException ignored) {}
+        model.putBuildInfo("buildTool", "unknown");
     }
 
     public LanguageDetector getDetector() {
