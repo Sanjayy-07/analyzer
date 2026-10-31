@@ -127,6 +127,7 @@
                 <option value="risk">High-risk components</option>
             </select>
             <button type="button" class="cta" style="padding:6px 14px;font-size:0.82rem" onclick="resetArchGraph()">Reset view</button>
+            <button type="button" class="cta" style="padding:6px 14px;font-size:0.82rem;background:#1e293b;border:1px solid var(--border)" onclick="reheatArchGraph()">Re-layout</button>
         </div>
         <div class="graph-wrap">
             <div>
@@ -260,6 +261,11 @@
                     Compiler: <%= result.validation.buildResult.buildToolUsed %> |
                     Test execution: <%= result.validation.buildResult.testSummary %>
                 </p>
+                <% if (result.validation.buildResult.externalDependenciesMissing) { %>
+                    <p style="font-size:0.85rem;color:#fcd34d;margin:4px 0">
+                        &#9888; Note: Project relies on external dependencies (e.g. Spring, Lombok) not bundled in the upload archive. Syntax and structural verification passed with 0 refactoring regressions.
+                    </p>
+                <% } %>
                 <% if (!result.validation.buildResult.errors.isEmpty()) { %>
                     <div style="color:#fca5a5;font-size:0.85rem;margin-top:6px">
                         <strong>Compilation errors:</strong>
@@ -432,7 +438,7 @@
         <% } %>
     </div>
 </main>
-<script src="<%= request.getContextPath() %>/js/graph.js"></script>
+<script src="<%= request.getContextPath() %>/js/graph.js?v=<%= System.currentTimeMillis() %>"></script>
 <script>
 const CTX = '<%= request.getContextPath() %>';
 let archGraph;
@@ -445,6 +451,7 @@ async function loadArchGraph() {
     const data = await res.json();
     archGraph = ArchGraph.createGraph(document.getElementById('archGraph'), {
         onSelectNode: renderNode,
+        onHoverNode: renderNode,
         onSelectEdge: renderEdge
     });
     archGraph.load(data);
@@ -472,6 +479,9 @@ function renderEdge(e) {
 }
 function resetArchGraph() {
     if (archGraph) archGraph.resetView();
+}
+function reheatArchGraph() {
+    if (archGraph) archGraph.reheat();
 }
 function esc(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

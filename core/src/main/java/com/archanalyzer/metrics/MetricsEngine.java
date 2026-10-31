@@ -46,6 +46,9 @@ public class MetricsEngine {
         double fanOutSum = 0;
         double couplingSum = 0;
         int maxDepth = 0;
+        int concreteEdges = 0;
+        int abstractEdges = 0;
+        int interfaceCount = 0;
 
         for (String id : graph.vertices()) {
             ComponentMetrics cm = new ComponentMetrics();
@@ -57,12 +60,33 @@ public class MetricsEngine {
             cm.dependencyDepth = GraphAlgorithms.longestChainFrom(graph, id, new HashSet<>());
             cm.instability = (cm.fanIn + cm.fanOut) == 0 ? 0.0 : cm.fanOut / (double) (cm.fanIn + cm.fanOut);
 
-            model.getComponent(id).ifPresent(c -> {
-                cm.loc = c.getLoc();
-                cm.cyclomaticComplexity = c.getCyclomaticComplexity();
-                cm.methodCount = c.getMethodCount();
-                cm.fieldCount = c.getFieldCount();
-            });
+            if (model != null) {
+                model.getComponent(id).ifPresent(c -> {
+                    cm.loc = c.getLoc();
+                    cm.cyclomaticComplexity = c.getCyclomaticComplexity();
+                    cm.methodCount = c.getMethodCount();
+                    cm.fieldCount = c.getFieldCount();
+                    if (c.getKind() == com.archanalyzer.model.ProjectModel.ComponentNode.Kind.INTERFACE) {
+                        // Handled below per vertex
+                    }
+                });
+                var optC = model.getComponent(id);
+                if (optC.isPresent() && optC.get().getKind() == com.archanalyzer.model.ProjectModel.ComponentNode.Kind.INTERFACE) {
+                    interfaceCount++;
+                }
+            }
+
+            for (String targetId : graph.outgoing(id)) {
+                boolean isInterface = false;
+                if (model != null) {
+                    var targetNode = model.getComponent(targetId);
+                    if (targetNode.isPresent() && targetNode.get().getKind() == com.archanalyzer.model.ProjectModel.ComponentNode.Kind.INTERFACE) {
+                        isInterface = true;
+                    }
+                }
+                if (isInterface) abstractEdges++;
+                else concreteEdges++;
+            }
 
             fanOutSum += cm.fanOut;
             couplingSum += (cm.fanIn + cm.fanOut);
@@ -72,42 +96,46 @@ public class MetricsEngine {
         }
 
         int n = Math.max(1, pm.totalComponents);
-        pm.averageFanOut = fanOutSum / n;
-        pm.averageCoupling = couplingSum / n;
+        pm.averageFanOut = round1(fanOutSum / n);
+        pm.averageCoupling = round1(couplingSum / n);
         pm.maxDependencyDepth = maxDepth;
 
-        pm.dependencyScore = computeDependencyScore(pm);
-        pm.architectureHealthScore = computeArchitectureHealth(pm);
+        pm.dependencyScore = computeDependencyScore(pm, concreteEdges, abstractEdges, n);
+        pm.architectureHealthScore = computeArchitectureHealth(pm, interfaceCount, n);
 
         return pm;
     }
 
     /**
-     * Dependency Score (0-100): higher means more dependency pressure
-     * (worse). Explainable weighted combination of average coupling, cycle
-     * presence, and dependency depth, each normalized against reasonable
-     * reference scales rather than magic constants pulled from nowhere:
-     *  - avg coupling normalized against 20 (an empirically "high" average
-     *    fan-in+fan-out per component for a healthy modular design)
-     *  - depth normalized against 10 (a chain of 10+ is a strong smell)
-     *  - cycles: each cycle contributes fixed pressure, capped
+     * Dependency Score (0-100): higher means more dependency pressure (worse).
+     * Distinguishes rigid concrete coupling (weight 1.0) from loose interface abstraction coupling (weight 0.35).
      */
-    private double computeDependencyScore(ProjectMetrics pm) {
-        double couplingComponent = Math.min(1.0, pm.averageCoupling / 20.0) * 50;
+    private double computeDependencyScore(ProjectMetrics pm, int concreteEdges, int abstractEdges, int n) {
+        double weightedEdges = concreteEdges * 1.0 + abstractEdges * 0.35;
+        double effectiveCoupling = (weightedEdges * 2.0) / (double) n;
+
+        double couplingComponent = Math.min(1.0, effectiveCoupling / 20.0) * 50;
         double depthComponent = Math.min(1.0, pm.maxDependencyDepth / 10.0) * 25;
         double cycleComponent = Math.min(1.0, pm.cycleCount / 5.0) * 25;
-        return round1(couplingComponent + depthComponent + cycleComponent);
+
+        // Relief rewarded for concrete coupling decoupled into interface contracts
+        double abstractionRelief = Math.min(10.0, abstractEdges * 0.45);
+        return round1(Math.max(0, (couplingComponent + depthComponent + cycleComponent) - abstractionRelief));
     }
 
-    /** Architecture Health (0-100): inverse-flavored composite; higher is better. */
-    private double computeArchitectureHealth(ProjectMetrics pm) {
+    /**
+     * Architecture Health (0-100): composite health rewarded for interface contracts / DIP compliance.
+     */
+    private double computeArchitectureHealth(ProjectMetrics pm, int interfaceCount, int n) {
         double base = 100 - pm.dependencyScore;
-        // Extra penalty for components with cyclomatic complexity that suggests low cohesion / god-classes,
-        // averaged in gently so a single outlier doesn't dominate.
         double avgComplexity = pm.perComponent.values().stream()
             .mapToInt(c -> c.cyclomaticComplexity).average().orElse(0);
         double complexityPenalty = Math.min(15, avgComplexity / 2.0);
-        return round1(Math.max(0, Math.min(100, base - complexityPenalty)));
+
+        // Abstraction bonus rewarded for Dependency Inversion Principle (DIP contracts)
+        double abstractionBonus = Math.min(12.0, interfaceCount * 2.5);
+
+        return round1(Math.max(0, Math.min(100, base - complexityPenalty + abstractionBonus)));
     }
 
     private double round1(double v) { return Math.round(v * 10) / 10.0; }

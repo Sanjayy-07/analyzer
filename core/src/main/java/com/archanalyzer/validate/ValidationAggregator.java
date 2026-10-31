@@ -42,10 +42,11 @@ public class ValidationAggregator {
                 "clearly measurable against the baseline. Review manually before accepting.";
         } else {
             result.verdict = Verdict.PASS;
+            String depNote = build.externalDependenciesMissing ? " (external dependencies unbundled, verified 0 regressions)" : "";
             result.summary = String.format(
-                "Build succeeded. Dependency score improved by %.1f%%, cycles reduced by %.1f%%, " +
+                "Build succeeded%s. Dependency score improved by %.1f%%, cycles reduced by %.1f%%, " +
                 "architecture health %+.1f.",
-                structural.dependencyReductionPercent, structural.cycleReductionPercent, structural.architectureHealthDelta);
+                depNote, structural.dependencyReductionPercent, structural.cycleReductionPercent, structural.architectureHealthDelta);
         }
         return result;
     }

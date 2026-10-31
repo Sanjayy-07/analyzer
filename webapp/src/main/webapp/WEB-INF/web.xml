@@ -95,27 +95,11 @@
         <url-pattern>/mvc/*</url-pattern>
     </servlet-mapping>
 
-    <!-- ================= Module 3: Filter (session/auth check) ================= -->
+    <!-- ================= Module 3: Filter (Login requirement disabled) ================= -->
     <filter>
         <filter-name>AuthenticationFilter</filter-name>
         <filter-class>com.archanalyzer.web.filter.AuthenticationFilter</filter-class>
     </filter>
-    <filter-mapping>
-        <filter-name>AuthenticationFilter</filter-name>
-        <url-pattern>/dashboard</url-pattern>
-    </filter-mapping>
-    <filter-mapping>
-        <filter-name>AuthenticationFilter</filter-name>
-        <url-pattern>/projects/*</url-pattern>
-    </filter-mapping>
-    <filter-mapping>
-        <filter-name>AuthenticationFilter</filter-name>
-        <url-pattern>/simulator</url-pattern>
-    </filter-mapping>
-    <filter-mapping>
-        <filter-name>AuthenticationFilter</filter-name>
-        <url-pattern>/simulator/*</url-pattern>
-    </filter-mapping>
 
     <!-- ================= Session configuration (Module 3: session tracking) ================= -->
     <session-config>

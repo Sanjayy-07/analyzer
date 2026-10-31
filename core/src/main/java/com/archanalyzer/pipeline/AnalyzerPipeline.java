@@ -281,8 +281,7 @@ public class AnalyzerPipeline {
             } catch (Exception e) {
                 selected.status = "FAILED";
                 selected.plannedChanges.add("FAILED: " + e.getMessage());
-                deleteRecursive(refactoredRoot);
-                copyDirectory(projectRoot, refactoredRoot);
+                safeRollback(projectRoot, refactoredRoot);
                 Path finalZip = workDir.resolve(projectName + "-original.zip");
                 packager.packageToZip(projectRoot, finalZip);
                 result.finalZipPath = finalZip;
@@ -293,8 +292,7 @@ public class AnalyzerPipeline {
         } else {
             selected.status = "SKIPPED";
             selected.plannedChanges.add("SKIPPED: Target component not found in model");
-            deleteRecursive(refactoredRoot);
-            copyDirectory(projectRoot, refactoredRoot);
+            safeRollback(projectRoot, refactoredRoot);
             Path finalZip = workDir.resolve(projectName + "-original.zip");
             packager.packageToZip(projectRoot, finalZip);
             result.finalZipPath = finalZip;
@@ -311,7 +309,7 @@ public class AnalyzerPipeline {
 
         // 17. BUILD / TEST / STRUCTURAL VALIDATION
         Baseline baseline = Baseline.capture(before);
-        BuildValidator.BuildResult buildResult = buildValidator.compile(refactoredRoot, List.of());
+        BuildValidator.BuildResult buildResult = buildValidator.compile(refactoredRoot, List.of(), projectRoot);
         buildValidator.runExternalBuildToolValidation(refactoredRoot,
             model.getBuildInfo().getOrDefault("buildTool", "unknown"), buildResult);
 
@@ -328,8 +326,7 @@ public class AnalyzerPipeline {
             recovery.ifPresent(c -> c.status = "PROPOSED (recovery candidate — not auto-applied in this run)");
 
             // Roll back the working copy so rejected changes do not leak into disk or deliverable
-            deleteRecursive(refactoredRoot);
-            copyDirectory(projectRoot, refactoredRoot);
+            safeRollback(projectRoot, refactoredRoot);
 
             // 19. FINAL ZIP: Deliver original project because candidate was rejected
             Path finalZip = workDir.resolve(projectName + "-original.zip");
@@ -350,26 +347,41 @@ public class AnalyzerPipeline {
         return result;
     }
 
-    private void deleteRecursive(Path path) throws IOException {
-        if (!Files.exists(path)) return;
-        try (var walk = Files.walk(path)) {
-            var list = walk.sorted(Comparator.reverseOrder()).toList();
-            for (Path p : list) {
-                Files.deleteIfExists(p);
-            }
+    private void safeRollback(Path pristineSource, Path targetDir) {
+        if (targetDir == null) return;
+        deleteRecursive(targetDir);
+        if (pristineSource != null && Files.exists(pristineSource)) {
+            copyDirectory(pristineSource, targetDir);
         }
     }
 
-    private void copyDirectory(Path source, Path target) throws IOException {
+    private void deleteRecursive(Path path) {
+        if (path == null || !Files.exists(path)) return;
+        System.gc();
+        try (var walk = Files.walk(path)) {
+            var list = walk.sorted(Comparator.reverseOrder()).toList();
+            for (Path p : list) {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void copyDirectory(Path source, Path target) {
+        if (source == null || !Files.exists(source)) return;
         try (var walk = Files.walk(source)) {
             for (Path src : (Iterable<Path>) walk::iterator) {
-                Path dest = target.resolve(source.relativize(src));
-                if (Files.isDirectory(src)) Files.createDirectories(dest);
-                else {
-                    Files.createDirectories(dest.getParent());
-                    Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
-                }
+                try {
+                    Path dest = target.resolve(source.relativize(src));
+                    if (Files.isDirectory(src)) {
+                        Files.createDirectories(dest);
+                    } else {
+                        Files.createDirectories(dest.getParent());
+                        Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } catch (Exception ignored) {}
             }
-        }
+        } catch (Exception ignored) {}
     }
 }

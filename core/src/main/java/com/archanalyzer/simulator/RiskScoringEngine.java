@@ -54,48 +54,101 @@ public class RiskScoringEngine {
         RiskAssessment assessment = new RiskAssessment();
 
         String targetId = request.getTargetComponentId();
-        ComponentNode targetNode = targetId != null ? model.getComponent(targetId).orElse(null) : null;
+        ComponentNode targetNode = targetId != null && model != null ? model.getComponent(targetId).orElse(null) : null;
         ComponentMetrics targetMetrics = targetId != null && metrics != null ? metrics.perComponent.get(targetId) : null;
 
-        int totalComponents = Math.max(1, graph != null ? graph.vertexCount() : model.componentCount());
         int totalAffected = directImpact.size() + indirectImpact.size();
+        Set<String> allAffected = new LinkedHashSet<>(directImpact);
+        allAffected.addAll(indirectImpact);
 
-        // 1. Breadth Factor (0-25 pts): fraction of project components affected
-        double breadthRatio = Math.min(1.0, (double) totalAffected / (double) totalComponents);
-        double breadthScore = breadthRatio * 25.0;
-        assessment.factorWeights.put("downstreamBreadth", round1(breadthScore));
-        if (totalAffected > 0) {
-            assessment.contributingFactors.add(
-                String.format("%d downstream component(s) affected (%d direct, %d indirect) out of %d total (%.0f%% project scope)",
-                    totalAffected, directImpact.size(), indirectImpact.size(), totalComponents, breadthRatio * 100)
-            );
+        // 1. Downstream Blast Radius Magnitude (0-30 pts)
+        // Calibrated to real-world software engineering blast radius thresholds:
+        // A change cascading across 10-15 components is a widespread ripple effect.
+        double breadthScore;
+        if (totalAffected == 0) {
+            breadthScore = 0.0;
+            assessment.contributingFactors.add("Component is isolated: 0 downstream dependents affected.");
+        } else if (totalAffected == 1) {
+            breadthScore = 8.0;
+            assessment.contributingFactors.add("Localized impact: 1 downstream component directly affected.");
+        } else if (totalAffected <= 4) {
+            breadthScore = 15.0;
+            assessment.contributingFactors.add(String.format("Subsystem cascade: %d downstream components affected (%d direct, %d indirect).",
+                totalAffected, directImpact.size(), indirectImpact.size()));
+        } else if (totalAffected <= 9) {
+            breadthScore = 22.0;
+            assessment.contributingFactors.add(String.format("Broad domain cascade: %d downstream components affected (%d direct, %d indirect).",
+                totalAffected, directImpact.size(), indirectImpact.size()));
+        } else if (totalAffected <= 19) {
+            breadthScore = 27.0;
+            assessment.contributingFactors.add(String.format("Major cross-system cascade: %d downstream components affected (%d direct, %d indirect).",
+                totalAffected, directImpact.size(), indirectImpact.size()));
         } else {
-            assessment.contributingFactors.add("Component is isolated; no downstream project components directly depend on it.");
+            breadthScore = 30.0;
+            assessment.contributingFactors.add(String.format("Critical widespread cascade: %d downstream components affected across system.", totalAffected));
+        }
+        assessment.factorWeights.put("downstreamBreadth", round1(breadthScore));
+
+        // 2. Architectural Tier & API Surface Exposure (0-25 pts)
+        // Inspects whether the blast radius reaches HTTP REST Controllers, Business Services, or Repositories
+        int affectedControllers = 0;
+        int affectedServices = 0;
+        int affectedRepositories = 0;
+        for (String affId : allAffected) {
+            ComponentNode cn = model != null ? model.getComponent(affId).orElse(null) : null;
+            String lower = affId.toLowerCase();
+            boolean isCtrl = (cn != null && cn.getLayer().contains("controller")) || lower.contains("controller") || lower.contains("endpoint") || lower.contains("resource");
+            boolean isSrv = (cn != null && cn.getLayer().contains("service")) || lower.contains("service");
+            boolean isRepo = (cn != null && (cn.getLayer().contains("repository") || cn.getLayer().contains("dao"))) || lower.contains("repository") || lower.contains("dao");
+            if (isCtrl) affectedControllers++;
+            else if (isSrv) affectedServices++;
+            else if (isRepo) affectedRepositories++;
         }
 
-        // 2. Depth Factor (0-15 pts): dependency chain depth to farthest dependent
-        double depthScore = Math.min(1.0, maxImpactDepth / 6.0) * 15.0;
+        double tierScore = 0.0;
+        if (affectedControllers > 0) {
+            double ctrlPts = Math.min(14.0, affectedControllers * 2.0);
+            tierScore += ctrlPts;
+            assessment.contributingFactors.add(String.format("High API boundary exposure: %d REST controller(s) in blast radius; external HTTP contracts at risk.", affectedControllers));
+        }
+        if (affectedServices > 0) {
+            double srvPts = Math.min(11.0, affectedServices * 2.0);
+            tierScore += srvPts;
+            assessment.contributingFactors.add(String.format("Core business logic exposure: %d transactional service(s) in blast radius.", affectedServices));
+        }
+        if (affectedRepositories > 0) {
+            double repoPts = Math.min(8.0, affectedRepositories * 2.0);
+            tierScore += repoPts;
+            assessment.contributingFactors.add(String.format("Data persistence exposure: %d repository/DAO component(s) in blast radius.", affectedRepositories));
+        }
+        tierScore = Math.min(25.0, tierScore);
+        assessment.factorWeights.put("architecturalTierExposure", round1(tierScore));
+
+        // 3. Impact Propagation Depth (0-15 pts): dependency chain depth to farthest consumer
+        double depthScore = Math.min(15.0, maxImpactDepth * 3.5);
         assessment.factorWeights.put("impactDepth", round1(depthScore));
         if (maxImpactDepth > 0) {
             assessment.contributingFactors.add(
-                String.format("Impact propagates across %d architectural dependency tier(s).", maxImpactDepth)
+                String.format("Impact propagates across %d architectural tier(s) to farthest dependent.", maxImpactDepth)
             );
         }
 
-        // 3. Centrality & Coupling Factor (0-20 pts)
+        // 4. Centrality & Shared Component Coupling (0-15 pts)
         double centrality = targetMetrics != null ? targetMetrics.centrality : 0.0;
         int fanIn = targetMetrics != null ? targetMetrics.fanIn : 0;
         int fanOut = targetMetrics != null ? targetMetrics.fanOut : 0;
-        double couplingScore = Math.min(1.0, (fanIn * 0.7 + fanOut * 0.3) / 10.0) * 12.0 + (centrality * 8.0);
+        double couplingScore = Math.min(15.0, Math.max(
+            (fanIn * 1.5 + fanOut * 0.5) + (centrality * 10.0),
+            Math.min(15.0, totalAffected * 1.0)
+        ));
         assessment.factorWeights.put("couplingAndCentrality", round1(couplingScore));
-        if (fanIn >= 3 || centrality > 0.3) {
+        if (totalAffected >= 5 || fanIn >= 3 || centrality > 0.3) {
             assessment.contributingFactors.add(
-                String.format("Target component has high coupling (fan-in=%d, fan-out=%d, centrality=%.2f).",
-                    fanIn, fanOut, centrality)
+                String.format("Target is a shared foundational dependency (%d total downstream components depend on it).", totalAffected)
             );
         }
 
-        // 4. Circular Dependency / Smells Factor (0-15 pts)
+        // 5. Circular Dependency / Smells Factor (0-15 pts)
         double cycleScore = 0.0;
         boolean inCycle = targetMetrics != null && targetMetrics.inCycle;
         if (inCycle) {
@@ -106,7 +159,7 @@ public class RiskScoringEngine {
         }
         assessment.factorWeights.put("cycleInvolvement", round1(cycleScore));
 
-        // 5. Operation Type & Architectural Layer Criticality (0-15 pts)
+        // 6. Operation Type & Architectural Layer Criticality (0-15 pts)
         double opCriticalityScore = 0.0;
         ChangeOperationType op = request.getOperation() != null ? request.getOperation() : ChangeOperationType.OTHER;
         switch (op) {
@@ -126,6 +179,10 @@ public class RiskScoringEngine {
                 opCriticalityScore += 8.0;
                 assessment.contributingFactors.add("Introducing a new module requires establishing correct layering to prevent circular imports.");
             }
+            case INTRODUCE_INTERFACE -> {
+                opCriticalityScore += 6.0;
+                assessment.contributingFactors.add("Interface extraction refactoring alters dependency injection and binding contracts.");
+            }
             case ADD_FEATURE -> {
                 opCriticalityScore += 5.0;
                 assessment.contributingFactors.add("Feature addition preserves existing APIs but requires integration testing across callers.");
@@ -133,18 +190,18 @@ public class RiskScoringEngine {
             default -> opCriticalityScore += 5.0;
         }
 
-        // Layer adjustment
         if (targetNode != null) {
             if (targetNode.getLayer().contains("repository") || targetNode.getLayer().contains("model")) {
-                opCriticalityScore += 5.0;
+                opCriticalityScore += 4.0;
                 assessment.contributingFactors.add("Target belongs to foundational data/model layer (high architectural criticality).");
             } else if (targetNode.getLayer().contains("service")) {
                 opCriticalityScore += 3.0;
             }
         }
+        opCriticalityScore = Math.min(15.0, opCriticalityScore);
         assessment.factorWeights.put("operationAndLayer", round1(opCriticalityScore));
 
-        // 6. Test Coverage Assessment (0-10 pts penalty if no test covers it)
+        // 7. Test Coverage Assessment (0-10 pts penalty if no test covers it)
         double testScore = 0.0;
         boolean hasTest = hasCoveringTest(targetId, model);
         if (!hasTest) {
@@ -158,36 +215,18 @@ public class RiskScoringEngine {
         assessment.factorWeights.put("testCoverageDeficit", round1(testScore));
 
         // Compute deterministic heuristic score
-        double rawHeuristic = breadthScore + depthScore + couplingScore + cycleScore + opCriticalityScore + testScore;
+        double rawHeuristic = breadthScore + tierScore + depthScore + couplingScore + cycleScore + opCriticalityScore + testScore;
         assessment.heuristicScore = Math.min(100.0, Math.max(5.0, rawHeuristic));
 
-        // 7. ML Model Risk Integration (if service available)
+        // 8. ML Model Risk Integration (if service available)
         if (riskService != null && targetMetrics != null) {
             try {
                 RiskPrediction pred = riskService.predict(targetMetrics, 0);
-                double mlScore = 20.0;
-                if ("HIGH".equalsIgnoreCase(pred.riskLabel)) {
-                    mlScore = 80.0 * pred.confidence;
-                    assessment.contributingFactors.add(
-                        String.format("Trained Random Forest ML model predicts HIGH structural risk (%.0f%% confidence).",
-                            pred.confidence * 100)
-                    );
-                } else if ("MEDIUM".equalsIgnoreCase(pred.riskLabel)) {
-                    mlScore = 50.0 * pred.confidence;
-                    assessment.contributingFactors.add(
-                        String.format("Trained Random Forest ML model predicts MEDIUM structural risk (%.0f%% confidence).",
-                            pred.confidence * 100)
-                    );
-                } else {
-                    mlScore = 15.0;
-                    assessment.contributingFactors.add(
-                        String.format("Trained Random Forest ML model predicts LOW baseline risk (%.0f%% confidence).",
-                            pred.confidence * 100)
-                    );
-                }
+                double mlScore = "HIGH".equalsIgnoreCase(pred.riskLabel) ? 80.0 :
+                                 "MEDIUM".equalsIgnoreCase(pred.riskLabel) ? 50.0 : 25.0;
                 assessment.mlPredictedScore = mlScore;
-                // Weighted blend: 70% static architecture evidence, 30% ML classifier
-                assessment.overallScore = round1((assessment.heuristicScore * 0.7) + (mlScore * 0.3));
+                // Weighted blend: 80% static architecture evidence, 20% ML code defect prediction
+                assessment.overallScore = round1((assessment.heuristicScore * 0.8) + (mlScore * 0.2));
             } catch (Exception e) {
                 assessment.overallScore = round1(assessment.heuristicScore);
             }
@@ -197,13 +236,13 @@ public class RiskScoringEngine {
 
         // Ambiguity penalty
         if (request.isAmbiguous()) {
-            assessment.overallScore = Math.min(100.0, assessment.overallScore + 10.0);
+            assessment.overallScore = Math.min(100.0, assessment.overallScore + 8.0);
             assessment.contributingFactors.add("Uncertainty penalty: target component resolution is ambiguous.");
         }
 
-        assessment.overallScore = Math.min(100.0, Math.max(0.0, assessment.overallScore));
+        assessment.overallScore = Math.min(100.0, Math.max(5.0, assessment.overallScore));
 
-        // 8. Classify Risk Category
+        // 9. Classify Risk Category
         if (assessment.overallScore >= 80.0) {
             assessment.riskCategory = "Critical";
         } else if (assessment.overallScore >= 60.0) {

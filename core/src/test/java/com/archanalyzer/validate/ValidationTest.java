@@ -64,6 +64,66 @@ public class ValidationTest {
     }
 
     @Test
+    void testBuildValidatorIgnoresUnbundledExternalDependenciesWithBaseline(@TempDir Path tempDir) throws IOException {
+        Path baseDir = tempDir.resolve("baseline");
+        Path refactoredDir = tempDir.resolve("refactored");
+
+        Path basePkg = baseDir.resolve("src/main/java/com/example");
+        Files.createDirectories(basePkg);
+        Files.writeString(basePkg.resolve("Service.java"),
+            "package com.example;\n" +
+            "import org.springframework.stereotype.Service;\n" +
+            "@Service\n" +
+            "public class Service { public void doWork() {} }");
+
+        Path refPkg = refactoredDir.resolve("src/main/java/com/example");
+        Files.createDirectories(refPkg);
+        Files.writeString(refPkg.resolve("Service.java"),
+            "package com.example;\n" +
+            "import org.springframework.stereotype.Service;\n" +
+            "@Service\n" +
+            "public class Service implements IService { public void doWork() {} }");
+        Files.writeString(refPkg.resolve("IService.java"),
+            "package com.example;\n" +
+            "public interface IService { void doWork(); }");
+
+        BuildValidator.BuildResult result = buildValidator.compile(refactoredDir, List.of(), baseDir);
+        assertEquals(BuildValidator.Status.PASS, result.status);
+        assertTrue(result.externalDependenciesMissing);
+        assertTrue(result.errors.isEmpty());
+    }
+
+    @Test
+    void testBuildValidatorRejectsNewSyntaxErrorsAfterRefactoring(@TempDir Path tempDir) throws IOException {
+        Path baseDir = tempDir.resolve("baseline");
+        Path refactoredDir = tempDir.resolve("refactored");
+
+        Path basePkg = baseDir.resolve("src/main/java/com/example");
+        Files.createDirectories(basePkg);
+        Files.writeString(basePkg.resolve("Service.java"),
+            "package com.example;\n" +
+            "import org.springframework.stereotype.Service;\n" +
+            "@Service\n" +
+            "public class Service { public void doWork() {} }");
+
+        Path refPkg = refactoredDir.resolve("src/main/java/com/example");
+        Files.createDirectories(refPkg);
+        Files.writeString(refPkg.resolve("Service.java"),
+            "package com.example;\n" +
+            "import org.springframework.stereotype.Service;\n" +
+            "@Service\n" +
+            "public class Service implements IService { public int brokenMethod() { return \"bad\"; } }");
+        Files.writeString(refPkg.resolve("IService.java"),
+            "package com.example;\n" +
+            "public interface IService { }");
+
+        BuildValidator.BuildResult result = buildValidator.compile(refactoredDir, List.of(), baseDir);
+
+        assertEquals(BuildValidator.Status.FAIL, result.status);
+        assertFalse(result.errors.isEmpty());
+    }
+
+    @Test
     void testStructuralValidatorDetectsImprovement() {
         ProjectMetrics before = new ProjectMetrics();
         before.architectureHealthScore = 70.0;

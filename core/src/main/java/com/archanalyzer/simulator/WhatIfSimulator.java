@@ -117,7 +117,23 @@ public class WhatIfSimulator {
             throw new IllegalStateException("Simulation mutated the original dependency graph.");
         }
 
-        ProjectMetrics projected = metricsEngine.analyze(model, proposed);
+        ProjectModel proposedModel = new ProjectModel(model != null ? model.getProjectName() : "SimulatedProject");
+        if (model != null) {
+            for (ProjectModel.ComponentNode cn : model.getComponents()) {
+                proposedModel.addComponent(cn);
+            }
+        }
+        for (String created : plan.createdComponents) {
+            int dot = created.lastIndexOf('.');
+            String simple = dot >= 0 ? created.substring(dot + 1) : created;
+            String pkg = dot >= 0 ? created.substring(0, dot) : "";
+            ProjectModel.ComponentNode ifaceNode = new ProjectModel.ComponentNode(
+                created, simple, pkg, ProjectModel.ComponentNode.Kind.INTERFACE, ""
+            );
+            proposedModel.addComponent(ifaceNode);
+        }
+
+        ProjectMetrics projected = metricsEngine.analyze(proposedModel, proposed);
         result.setProposedMetrics(projected);
         List<Smell> currentSmells = baselineSmells != null ? baselineSmells : smellDetector.detect(baselineMetrics, graph);
         List<Smell> proposedSmells = smellDetector.detect(projected, proposed);
@@ -137,7 +153,7 @@ public class WhatIfSimulator {
 
         Set<String> newNodes = new LinkedHashSet<>(plan.createdComponents);
         result.setBaselineGraphPayload(GraphPayload.from(model, graph, baselineMetrics, currentSmells, List.of(), Set.of(), Set.of(), Set.of()));
-        result.setProposedGraphPayload(GraphPayload.from(model, proposed, projected, proposedSmells, List.of(), addedKeys, removedKeys, newNodes));
+        result.setProposedGraphPayload(GraphPayload.from(proposedModel, proposed, projected, proposedSmells, List.of(), addedKeys, removedKeys, newNodes));
         result.setProposedGraph(proposed);
 
         detectCycleDelta(graph, proposed, result, plan);
@@ -186,10 +202,30 @@ public class WhatIfSimulator {
 
         switch (op) {
             case INTRODUCE_INTERFACE -> {
-                if (from == null || to == null) {
+                if (from == null) {
                     plan.autoApplicable = false;
-                    plan.unsupportedReason = "Both client and provider components must be identified before an interface can be simulated.";
+                    plan.unsupportedReason = "No target component identified for interface introduction.";
                     return;
+                }
+                if (to == null) {
+                    // Single target component interface extraction: extract interface for 'from' and retarget callers
+                    String iface = req.getNewComponentId() != null ? req.getNewComponentId() : (modelPackage(from) + ".I" + GraphPayload.shortName(from));
+                    if (iface.startsWith(".")) iface = "I" + GraphPayload.shortName(from);
+                    plan.newComponentId = iface;
+                    plan.createdComponents.add(iface);
+                    plan.affectedComponents.add(from);
+                    plan.affectedComponents.add(iface);
+                    plan.addedDependencies.add(new EdgeChange(from, iface, "IMPLEMENTS", "Extracted interface"));
+                    for (String client : graph.incoming(from)) {
+                        plan.removedDependencies.add(new EdgeChange(client, from, "FIELD_TYPE", "Retarget callers to interface"));
+                        plan.addedDependencies.add(new EdgeChange(client, iface, "FIELD_TYPE", "Caller uses abstraction"));
+                        plan.redirectedDependencies.add(new EdgeChange(client, iface, "FIELD_TYPE", from));
+                        plan.affectedComponents.add(client);
+                    }
+                    plan.plannedSourceChanges.add("Extract interface " + iface + " from " + from);
+                    plan.plannedSourceChanges.add("Retarget incoming callers to interface abstraction " + iface);
+                    plan.autoApplicable = true;
+                    break;
                 }
                 String iface = req.getNewComponentId() != null ? req.getNewComponentId() : "I" + GraphPayload.shortName(to);
                 plan.newComponentId = iface;
@@ -293,6 +329,25 @@ public class WhatIfSimulator {
                     plan.unsupportedReason = "No target component for the feature addition.";
                     plan.autoApplicable = false;
                 }
+            }
+            case REMOVE_FEATURE, REMOVE_API -> {
+                if (from == null) {
+                    plan.autoApplicable = false;
+                    plan.unsupportedReason = "No target component identified to remove.";
+                    return;
+                }
+                plan.deletedComponents.add(from);
+                plan.affectedComponents.add(from);
+                for (String client : graph.incoming(from)) {
+                    plan.removedDependencies.add(new EdgeChange(client, from, "FIELD_TYPE", "Removed reference to deleted component"));
+                    plan.affectedComponents.add(client);
+                }
+                for (String dep : graph.outgoing(from)) {
+                    plan.removedDependencies.add(new EdgeChange(from, dep, "FIELD_TYPE", "Removed outgoing dependency of deleted component"));
+                }
+                plan.plannedSourceChanges.add("Remove component " + from + " and clean up references.");
+                plan.autoApplicable = false;
+                plan.unsupportedReason = "Removing a component from source requires manual cleanup of call sites.";
             }
             default -> {
                 plan.affectedComponents.add(from);

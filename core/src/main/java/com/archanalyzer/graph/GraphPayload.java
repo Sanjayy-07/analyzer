@@ -38,8 +38,11 @@ public final class GraphPayload {
             for (String id : graph.vertices()) {
                 Map<String, Object> n = new LinkedHashMap<>();
                 n.put("id", id);
-                n.put("label", shortName(id));
                 Optional<ProjectModel.ComponentNode> cn = model != null ? model.getComponent(id) : Optional.empty();
+                String label = cn.map(ProjectModel.ComponentNode::getSimpleName)
+                    .filter(s -> !s.isBlank())
+                    .orElseGet(() -> shortName(id));
+                n.put("label", shortName(label));
                 String kind = cn.map(c -> c.getKind().name()).orElse(
                     (newNodes != null && newNodes.contains(id)) ? "INTERFACE" : "CLASS");
                 n.put("kind", kind);
@@ -105,14 +108,30 @@ public final class GraphPayload {
     }
 
     public static String shortName(String id) {
-        if (id == null) return "";
-        int dot = id.lastIndexOf('.');
-        return dot >= 0 ? id.substring(dot + 1) : id;
+        if (id == null || id.isBlank()) return "";
+        String s = id.trim();
+        while (s.endsWith("/") || s.endsWith("\\")) {
+            s = s.substring(0, s.length() - 1);
+        }
+        int slash = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+        if (slash >= 0) {
+            s = s.substring(slash + 1);
+        }
+        int dot = s.lastIndexOf('.');
+        if (dot > 0) {
+            s = s.substring(dot + 1);
+        }
+        return s;
     }
 
     private static String packageOf(String id) {
-        if (id == null) return "";
-        int dot = id.lastIndexOf('.');
-        return dot >= 0 ? id.substring(0, dot) : "";
+        if (id == null || id.isBlank()) return "";
+        String s = id.trim();
+        int slash = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+        if (slash >= 0) {
+            return s.substring(0, slash).replace('\\', '/');
+        }
+        int dot = s.lastIndexOf('.');
+        return dot >= 0 ? s.substring(0, dot) : "";
     }
 }

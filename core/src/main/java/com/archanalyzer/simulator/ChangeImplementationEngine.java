@@ -82,7 +82,7 @@ public class ChangeImplementationEngine {
             simResult.setProjectedMetrics(metricsAfter);
 
             // 5. Run Compiler & Build Validation
-            BuildResult buildResult = buildValidator.compile(refactoredRoot, List.of());
+            BuildResult buildResult = buildValidator.compile(refactoredRoot, List.of(), originalProjectRoot);
             buildValidator.runExternalBuildToolValidation(refactoredRoot,
                 modelAfter.getBuildInfo().getOrDefault("buildTool", "unknown"), buildResult);
             result.buildResult = buildResult;

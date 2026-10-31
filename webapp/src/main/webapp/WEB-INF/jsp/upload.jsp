@@ -8,8 +8,12 @@
 </head>
 <body>
 <header class="topbar">
-    <div class="brand">Java ArchAnalyzer</div>
-    <nav><a href="${pageContext.request.contextPath}/dashboard">Dashboard</a></nav>
+    <a href="${pageContext.request.contextPath}/" style="text-decoration:none;color:inherit"><div class="brand">⚡ Java ArchAnalyzer</div></a>
+    <nav>
+        <a href="${pageContext.request.contextPath}/" style="color:#94a3b8">Home</a>
+        <a href="${pageContext.request.contextPath}/dashboard" style="margin-left:20px;color:#94a3b8">Dashboard</a>
+        <a href="${pageContext.request.contextPath}/simulator" style="margin-left:20px;color:#a5b4fc;font-weight:600">🔮 What-If Simulator</a>
+    </nav>
 </header>
 
 <main class="dashboard">

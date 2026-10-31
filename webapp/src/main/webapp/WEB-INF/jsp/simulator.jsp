@@ -840,17 +840,27 @@
                         <button type="button" class="btn-secondary" onclick="showGraphMode('proposed')">Proposed only</button>
                         <button type="button" class="btn-secondary" onclick="resetSimGraphs()">Reset view</button>
                     </div>
-                    <div id="graphPair" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;align-items:start">
                         <div>
-                            <div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">CURRENT</div>
-                            <canvas id="graphBefore" style="width:100%;height:320px;background:#0a0d14;border:1px solid #1e2840;border-radius:10px"></canvas>
+                            <div id="graphPair" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                                <div>
+                                    <div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">CURRENT</div>
+                                    <canvas id="graphBefore" style="width:100%;height:340px;background:#0a0d14;border:1px solid #1e2840;border-radius:10px"></canvas>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">PROPOSED (added = green, removed = dashed red)</div>
+                                    <canvas id="graphAfter" style="width:100%;height:340px;background:#0a0d14;border:1px solid #1e2840;border-radius:10px"></canvas>
+                                </div>
+                            </div>
+                            <div id="edgeDelta" style="margin-top:12px;font-size:0.82rem;color:#94a3b8"></div>
                         </div>
-                        <div>
-                            <div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">PROPOSED (added = green, removed = dashed red)</div>
-                            <canvas id="graphAfter" style="width:100%;height:320px;background:#0a0d14;border:1px solid #1e2840;border-radius:10px"></canvas>
-                        </div>
+                        <aside class="node-detail" id="simNodeDetail" style="background:#0e1320;border:1px solid #1e2840;border-radius:10px;padding:16px;min-height:340px">
+                            <h4 style="margin:0 0 10px 0;font-size:0.92rem;color:#93c5fd">Component Inspector</h4>
+                            <div id="simNodeDetailContent" style="font-size:0.85rem;color:#94a3b8;line-height:1.6">
+                                Hover or click any module (circle) on the graph to inspect its architectural properties, metrics, and simulation blast-radius impact.
+                            </div>
+                        </aside>
                     </div>
-                    <div id="edgeDelta" style="margin-top:12px;font-size:0.82rem;color:#94a3b8"></div>
                 </div>
             </div>
 
@@ -1002,7 +1012,7 @@
 <!-- Toast -->
 <div id="toast"></div>
 
-<script src="<%= request.getContextPath() %>/js/graph.js"></script>
+<script src="<%= request.getContextPath() %>/js/graph.js?v=<%= System.currentTimeMillis() %>"></script>
 <script>
 /* ═══════════════════════════════════════
    WHAT-IF SIMULATOR — FRONTEND ENGINE
@@ -1289,7 +1299,7 @@ function renderResults(sim) {
     const metricsCompare = document.getElementById('metricsCompare');
     const metricDefs = [
         { key: 'architectureHealth', label: 'Architecture Health', unit: '/ 100', lowerIsBad: false },
-        { key: 'dependencyScore',    label: 'Dependency Pressure', unit: '/ 100', lowerIsBad: false },
+        { key: 'dependencyScore',    label: 'Dependency Pressure', unit: '/ 100', lowerIsBad: true },
         { key: 'cycleCount',         label: 'Circular Dependencies', unit: '',     lowerIsBad: true },
         { key: 'totalComponents',    label: 'Total Components',    unit: '',     lowerIsBad: null },
         { key: 'totalDependencies',  label: 'Total Dependencies',  unit: '',     lowerIsBad: null },
@@ -1317,6 +1327,16 @@ function renderResults(sim) {
             <div class="metrics-compare-cell" style="text-align:center"><div class="mc-value">${base} ${m.unit}</div></div>
             <div class="metrics-compare-cell" style="text-align:center"><div class="mc-value ${cls}">${proj} ${m.unit}${delta}</div></div>`;
     });
+    const planObj = sim.changePlan || {};
+    const createdList = planObj.createdComponents || [];
+    const addedList = planObj.addedDependencies || [];
+    const removedList = planObj.removedDependencies || [];
+    if (createdList.length === 0 && addedList.length === 0 && removedList.length === 0) {
+        metricsCompare.innerHTML += `
+            <div style="grid-column: 1 / -1; font-size:0.8rem; color:#94a3b8; padding:8px 12px; background:rgba(255,255,255,0.03); border-radius:6px; margin-top:10px; border-left:3px solid #64748b">
+                ℹ️ <strong>Internal component modification:</strong> No inter-component dependency edges were added or removed in this scenario, so global dependency wiring and counts remain identical while ripple risk is evaluated across the blast radius.
+            </div>`;
+    }
 
     // ⑦ Unresolved Questions
     const questions = req.unresolvedQuestions || [];
@@ -1385,13 +1405,82 @@ function renderPlan(sim) {
         </div>`;
 }
 
+function renderSimNodeDetail(n, sim) {
+    if (!n) return;
+    const directSet = new Set((sim && sim.directlyAffected) || []);
+    const indirectSet = new Set((sim && sim.indirectlyAffected) || []);
+    const plan = (sim && sim.changePlan) || {};
+    const createdSet = new Set(plan.createdComponents || []);
+
+    let impactBadge = '';
+    let impactDesc = '';
+    if (directSet.has(n.id)) {
+        impactBadge = '<span class="badge" style="background:rgba(239,68,68,0.2);color:#fca5a5;border:1px solid #ef4444;padding:3px 8px;font-size:0.75rem;border-radius:4px;font-weight:600">DIRECT IMPACT (Target)</span>';
+        impactDesc = '<p style="color:#f87171;font-size:0.8rem;margin:6px 0 0 0">This is the target component being directly refactored or modified.</p>';
+    } else if (indirectSet.has(n.id)) {
+        impactBadge = '<span class="badge" style="background:rgba(245,158,11,0.2);color:#fcd34d;border:1px solid #f59e0b;padding:3px 8px;font-size:0.75rem;border-radius:4px;font-weight:600">INDIRECT IMPACT (Blast Radius)</span>';
+        impactDesc = '<p style="color:#fbbf24;font-size:0.8rem;margin:6px 0 0 0">Depends on or is invoked by the modified component; will require integration verification.</p>';
+    } else if (createdSet.has(n.id)) {
+        impactBadge = '<span class="badge" style="background:rgba(52,211,153,0.2);color:#86efac;border:1px solid #10b981;padding:3px 8px;font-size:0.75rem;border-radius:4px;font-weight:600">PROPOSED NEW ABSTRACTION</span>';
+        impactDesc = '<p style="color:#34d399;font-size:0.8rem;margin:6px 0 0 0">New interface or decoupling abstraction introduced in proposed architecture.</p>';
+    } else {
+        impactBadge = '<span class="badge" style="background:rgba(100,116,139,0.2);color:#cbd5e1;border:1px solid #475569;padding:3px 8px;font-size:0.75rem;border-radius:4px">Unaffected in simulation</span>';
+    }
+
+    const html = `
+        <div style="margin-bottom:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+                <span style="font-weight:700;font-size:1.05rem;color:#f1f5f9;word-break:break-all">${escHtml(n.label || shortName(n.id))}</span>
+                ${impactBadge}
+            </div>
+            <div style="font-size:0.75rem;color:#64748b;word-break:break-all">${escHtml(n.id)}</div>
+            ${impactDesc}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;background:rgba(255,255,255,0.02);padding:10px;border-radius:6px;border:1px solid #1e2840">
+            <div>
+                <span style="color:#64748b;font-size:0.72rem;text-transform:uppercase">Type</span>
+                <div style="font-weight:600;color:#e2e8f0">${escHtml(n.kind || 'CLASS')}</div>
+            </div>
+            <div>
+                <span style="color:#64748b;font-size:0.72rem;text-transform:uppercase">Layer</span>
+                <div style="font-weight:600;color:#e2e8f0">${escHtml(n.layer || 'business')}</div>
+            </div>
+            <div>
+                <span style="color:#64748b;font-size:0.72rem;text-transform:uppercase">Fan-in / Fan-out</span>
+                <div style="font-weight:600;color:#e2e8f0">${n.fanIn ?? 0} / ${n.fanOut ?? 0}</div>
+            </div>
+            <div>
+                <span style="color:#64748b;font-size:0.72rem;text-transform:uppercase">Cycle Status</span>
+                <div style="font-weight:600;color:${n.inCycle ? '#ef4444' : '#34d399'}">${n.inCycle ? 'In cycle ⚠️' : 'None'}</div>
+            </div>
+        </div>
+        ${n.smell ? `<div style="margin-bottom:10px;padding:8px 10px;background:rgba(245,158,11,0.1);border-left:3px solid #f59e0b;border-radius:4px;font-size:0.8rem;color:#fbbf24"><strong>Smell:</strong> ${escHtml(n.smell)}<div style="color:#cbd5e1;font-size:0.75rem;margin-top:2px">${escHtml(n.smellEvidence||'')}</div></div>` : ''}
+        ${n.risk ? `<div style="font-size:0.8rem;color:#cbd5e1"><strong>ML Defect Risk:</strong> ${escHtml(n.risk)} ${n.riskConfidence ? '(' + Math.round(n.riskConfidence*100) + '%)' : ''}</div>` : ''}
+    `;
+    const container = document.getElementById('simNodeDetailContent');
+    if (container) container.innerHTML = html;
+}
+
 function renderGraphs(sim) {
     const beforeCanvas = document.getElementById('graphBefore');
     const afterCanvas = document.getElementById('graphAfter');
-    graphBefore = ArchGraph.createGraph(beforeCanvas, {});
-    graphAfter = ArchGraph.createGraph(afterCanvas, {});
+    graphBefore = ArchGraph.createGraph(beforeCanvas, {
+        onSelectNode: n => renderSimNodeDetail(n, sim),
+        onHoverNode: n => renderSimNodeDetail(n, sim)
+    });
+    graphAfter = ArchGraph.createGraph(afterCanvas, {
+        onSelectNode: n => renderSimNodeDetail(n, sim),
+        onHoverNode: n => renderSimNodeDetail(n, sim)
+    });
     graphBefore.load(sim.baselineGraph || {nodes:[], edges:[]});
     graphAfter.load(sim.proposedGraph || {nodes:[], edges:[]});
+
+    const target = sim.request && sim.request.targetComponentId;
+    if (target) {
+        const found = (sim.proposedGraph && sim.proposedGraph.nodes || []).find(x => x.id === target);
+        if (found) renderSimNodeDetail(found, sim);
+    }
+
     const plan = sim.changePlan || {};
     const added = plan.addedDependencies || [];
     const removed = plan.removedDependencies || [];

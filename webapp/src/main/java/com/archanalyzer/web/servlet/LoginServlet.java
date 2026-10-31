@@ -27,22 +27,11 @@ public class LoginServlet extends HttpServlet {
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        req.getRequestDispatcher("/login.jsp").forward(req, resp);
+        resp.sendRedirect(req.getContextPath() + "/");
     }
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        String username = req.getParameter("username");
-        String password = req.getParameter("password");
-
-        if (DEMO_USERNAME.equals(username) && DEMO_PASSWORD.equals(password)) {
-            HttpSession session = req.getSession(true);
-            session.setAttribute("authenticatedUserId", 1L);
-            session.setAttribute("username", username);
-            resp.sendRedirect(req.getContextPath() + "/dashboard");
-        } else {
-            req.setAttribute("loginError", "Invalid username or password.");
-            req.getRequestDispatcher("/login.jsp").forward(req, resp);
-        }
+        resp.sendRedirect(req.getContextPath() + "/");
     }
 }
