@@ -61,7 +61,7 @@ public class ChangeImplementationEngine {
         if (Files.exists(refactoredRoot)) {
             deleteRecursive(refactoredRoot);
         }
-        copyDirectory(originalProjectRoot, refactoredRoot, workDir);
+        copyDirectory(originalProjectRoot, refactoredRoot);
 
         try {
             // 2. Materialize the structured source change
@@ -111,7 +111,7 @@ public class ChangeImplementationEngine {
             result.summary = "Validation failed (" + e.getMessage() + "). All changes were rolled back.";
 
             deleteRecursive(refactoredRoot);
-            copyDirectory(originalProjectRoot, refactoredRoot, workDir);
+            copyDirectory(originalProjectRoot, refactoredRoot);
 
             Path originalZip = workDir.resolve(projectName + "-original.zip");
             packager.packageToZip(originalProjectRoot, originalZip);
@@ -131,6 +131,20 @@ public class ChangeImplementationEngine {
         ChangeOperationType op = req.getOperation();
 
         if (op == ChangeOperationType.INTRODUCE_INTERFACE) {
+            if (req.getSecondaryComponentId() == null) {
+                // Single-target interface extraction
+                Path targetFile = findComponentFile(refactoredRoot, targetId);
+                if (targetFile != null && Files.exists(targetFile)) {
+                    String simpleName = simpleNameOf(targetId);
+                    List<RefactoringChange> changes = refactoringEngine.extractInterface(refactoredRoot, targetFile, simpleName);
+                    for (RefactoringChange c : changes) {
+                        result.appliedChanges.add(c.toString());
+                    }
+                    return;
+                } else {
+                    throw new IOException("Could not locate source file for component: " + targetId);
+                }
+            }
             Path clientFile = findComponentFile(refactoredRoot, targetId);
             Path providerFile = findComponentFile(refactoredRoot, req.getSecondaryComponentId());
             if (clientFile == null || providerFile == null) {
@@ -259,31 +273,26 @@ public class ChangeImplementationEngine {
         }
     }
 
-    private void copyDirectory(Path source, Path target, Path excludeDir) throws IOException {
+    private void copyDirectory(Path source, Path target) throws IOException {
+        if (source == null || !Files.exists(source)) return;
         Path normTarget = target.toAbsolutePath().normalize();
-        Path normExclude = excludeDir != null ? excludeDir.toAbsolutePath().normalize() : null;
+        Path normSource = source.toAbsolutePath().normalize();
 
-        List<Path> toCopy;
         try (var walk = Files.walk(source)) {
-            toCopy = walk.filter(p -> {
-                Path norm = p.toAbsolutePath().normalize();
-                if (norm.startsWith(normTarget)) return false;
-                if (normExclude != null && norm.startsWith(normExclude)) return false;
-                return true;
-            }).toList();
-        }
-
-        for (Path src : toCopy) {
-            Path rel = source.relativize(src);
-            if (rel.toString().isEmpty()) continue;
-            Path dest = target.resolve(rel);
-            if (Files.isDirectory(src)) {
-                Files.createDirectories(dest);
-            } else {
-                if (dest.getParent() != null) {
-                    Files.createDirectories(dest.getParent());
+            for (Path src : (Iterable<Path>) walk::iterator) {
+                Path norm = src.toAbsolutePath().normalize();
+                if (norm.startsWith(normTarget)) continue;
+                Path rel = normSource.relativize(norm);
+                if (rel.toString().isEmpty()) continue;
+                Path dest = target.resolve(rel);
+                if (Files.isDirectory(src)) {
+                    Files.createDirectories(dest);
+                } else {
+                    if (dest.getParent() != null) {
+                        Files.createDirectories(dest.getParent());
+                    }
+                    Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
                 }
-                Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
             }
         }
     }

@@ -74,6 +74,9 @@
         <a href="<%= request.getContextPath() %>/simulator" style="color:#a5b4fc;font-weight:600;background:rgba(99,102,241,0.12);padding:6px 14px;border-radius:8px;border:1px solid rgba(99,102,241,0.3)">🔮 What-If Simulator</a>
         <a href="<%= request.getContextPath() %>/projects/download/zip"><%= (result.finalZipPath != null && result.finalZipPath.getFileName().toString().endsWith("-refactored.zip")) ? "Download Refactored ZIP" : "Download Original Project ZIP" %></a>
         <a href="<%= request.getContextPath() %>/projects/download/report">Download Report</a>
+        <a href="<%= request.getContextPath() %>/history" style="margin-left:14px;background:rgba(56,189,248,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);padding:6px 14px;border-radius:8px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+            🕒 View History
+        </a>
     </nav>
 </header>
 

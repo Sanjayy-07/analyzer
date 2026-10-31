@@ -13,6 +13,9 @@
         <a href="${pageContext.request.contextPath}/" style="color:#94a3b8">Home</a>
         <a href="${pageContext.request.contextPath}/dashboard" style="margin-left:20px;color:#94a3b8">Dashboard</a>
         <a href="${pageContext.request.contextPath}/simulator" style="margin-left:20px;color:#a5b4fc;font-weight:600">🔮 What-If Simulator</a>
+        <a href="${pageContext.request.contextPath}/history" style="margin-left:20px;background:rgba(56,189,248,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);padding:6px 14px;border-radius:8px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+            🕒 View History
+        </a>
     </nav>
 </header>
 

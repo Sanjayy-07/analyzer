@@ -55,11 +55,11 @@ public class UploadServlet extends HttpServlet {
             AnalyzerPipeline.PipelineResult result = pipeline.run(
                 archivePath, tempDir.resolve("work"), projectName, ConstraintSet.defaults());
 
+            // Record in persistent ProjectHistoryManager so user can view history anytime
+            com.archanalyzer.web.history.ProjectHistoryManager.recordAnalysis(
+                projectName, submittedFileName, result, tempDir);
+
             HttpSession session = req.getSession();
-            Path oldTempDir = (Path) session.getAttribute("activeUploadTempDir");
-            if (oldTempDir != null && !oldTempDir.equals(tempDir)) {
-                deleteRecursiveSilently(oldTempDir);
-            }
             session.setAttribute("activeUploadTempDir", tempDir);
             session.setAttribute("lastPipelineResult", result);
 

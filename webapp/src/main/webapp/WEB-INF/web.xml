@@ -55,6 +55,23 @@
     </servlet-mapping>
 
     <servlet>
+        <servlet-name>HistoryServlet</servlet-name>
+        <servlet-class>com.archanalyzer.web.servlet.HistoryServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>HistoryServlet</servlet-name>
+        <url-pattern>/history</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>HistoryServlet</servlet-name>
+        <url-pattern>/projects/select</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>HistoryServlet</servlet-name>
+        <url-pattern>/api/projects/history</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
         <servlet-name>LoginServlet</servlet-name>
         <servlet-class>com.archanalyzer.web.servlet.LoginServlet</servlet-class>
     </servlet>

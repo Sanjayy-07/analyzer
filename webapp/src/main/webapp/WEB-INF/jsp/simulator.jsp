@@ -654,6 +654,9 @@
         <a href="<%= request.getContextPath() %>/projects/upload">New Analysis</a>
         <a href="<%= request.getContextPath() %>/dashboard" style="margin-left:24px;color:#94a3b8">Dashboard</a>
         <a href="<%= request.getContextPath() %>/projects/download/report" style="margin-left:24px;color:#94a3b8">Download Report</a>
+        <a href="<%= request.getContextPath() %>/history" style="margin-left:20px;background:rgba(56,189,248,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);padding:6px 14px;border-radius:8px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+            🕒 View History
+        </a>
     </nav>
 </header>
 
