@@ -22,16 +22,14 @@ public class GeminiLlmProvider implements LlmProvider {
         String url = config.getBaseUrl();
         this.baseUrl = (url == null || url.isBlank()) ? "https://generativelanguage.googleapis.com" : url;
         this.model = config.getModel();
-        this.timeout = Duration.ofSeconds(config.getTimeoutSeconds());
+        this.timeout = Duration.ofSeconds(Math.max(config.getTimeoutSeconds(), 90));
         this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(this.timeout)
+            .connectTimeout(Duration.ofSeconds(15))
             .build();
     }
 
     @Override
     public String generateCompletion(String systemPrompt, String userPrompt) throws AiServiceException {
-        String endpoint = baseUrl + "/v1beta/models/" + model + ":generateContent?key=" + apiKey;
-
         String jsonPayload = """
             {
               "systemInstruction": {
@@ -50,29 +48,133 @@ public class GeminiLlmProvider implements LlmProvider {
             }
             """.formatted(escapeJson(systemPrompt), escapeJson(userPrompt));
 
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoint))
-                .header("Content-Type", "application/json")
-                .timeout(timeout)
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
+        return executeWithModels(jsonPayload);
+    }
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    @Override
+    public String generateChatCompletion(String systemPrompt, java.util.List<ChatMessage> conversationHistory, String userPrompt) throws AiServiceException {
+        StringBuilder contentsJson = new StringBuilder();
+        contentsJson.append("[\n");
 
-            if (response.statusCode() != 200) {
-                throw new AiServiceException("Gemini API returned HTTP " + response.statusCode() + ": " + sanitize(response.body()));
+        boolean hasEntries = false;
+        if (conversationHistory != null) {
+            for (ChatMessage msg : conversationHistory) {
+                if (msg == null || msg.content() == null || msg.content().isBlank()) continue;
+                String role = "assistant".equalsIgnoreCase(msg.role()) || "model".equalsIgnoreCase(msg.role()) ? "model" : "user";
+                if (hasEntries) contentsJson.append(",\n");
+                contentsJson.append("    {\n");
+                contentsJson.append("      \"role\": \"").append(role).append("\",\n");
+                contentsJson.append("      \"parts\": [{\"text\": \"").append(escapeJson(msg.content())).append("\"}]\n");
+                contentsJson.append("    }");
+                hasEntries = true;
             }
-
-            return extractContent(response.body());
-        } catch (AiServiceException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new AiServiceException("Failed to call Gemini API: " + e.getMessage(), e);
         }
+
+        // Add current user prompt
+        if (hasEntries) contentsJson.append(",\n");
+        contentsJson.append("    {\n");
+        contentsJson.append("      \"role\": \"user\",\n");
+        contentsJson.append("      \"parts\": [{\"text\": \"").append(escapeJson(userPrompt)).append("\"}]\n");
+        contentsJson.append("    }\n  ]");
+
+        String jsonPayload = """
+            {
+              "systemInstruction": {
+                "parts": [{"text": "%s"}]
+              },
+              "contents": %s,
+              "generationConfig": {
+                "temperature": 0.3
+              }
+            }
+            """.formatted(escapeJson(systemPrompt), contentsJson.toString());
+
+        return executeWithModels(jsonPayload);
+    }
+
+    private String executeWithModels(String jsonPayload) throws AiServiceException {
+        java.util.List<String> modelsToTry = new java.util.ArrayList<>();
+        if (model != null && !model.isBlank() && !isRetired(model)) {
+            modelsToTry.add(model);
+        }
+        for (String m : java.util.List.of("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash")) {
+            if (!modelsToTry.contains(m)) modelsToTry.add(m);
+        }
+
+        AiServiceException lastEx = null;
+        for (String targetModel : modelsToTry) {
+            String endpoint = baseUrl + "/v1beta/models/" + targetModel + ":generateContent?key=" + apiKey;
+            int maxRetries = 2;
+            for (int attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(endpoint))
+                        .header("Content-Type", "application/json")
+                        .timeout(timeout)
+                        .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                        .build();
+
+                    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+                    if (response.statusCode() == 200) {
+                        return extractContent(response.body());
+                    } else if (response.statusCode() == 401 || response.statusCode() == 403) {
+                        throw new AiServiceException("Gemini authentication failed (HTTP " + response.statusCode() + "): Invalid or unauthorized API key.");
+                    } else if (response.statusCode() == 404) {
+                        lastEx = new AiServiceException("Gemini model " + targetModel + " not found (HTTP 404): " + sanitize(response.body()));
+                        break; // 404 is model-specific, move to next model immediately
+                    } else if (response.statusCode() == 429) {
+                        lastEx = new AiServiceException("Gemini quota or rate limit exceeded (HTTP 429): " + sanitize(response.body()));
+                        break; // Rate limit reached on this model, attempt fallback model
+                    } else if (response.statusCode() == 503) {
+                        lastEx = new AiServiceException("Gemini model " + targetModel + " unavailable (HTTP 503): " + sanitize(response.body()));
+                        if (attempt < maxRetries) {
+                            long waitMs = 1500L * attempt;
+                            java.util.Optional<String> retryAfter = response.headers().firstValue("Retry-After");
+                            if (retryAfter.isPresent()) {
+                                try {
+                                    waitMs = Math.min(Long.parseLong(retryAfter.get()) * 1000L, 5000L);
+                                } catch (NumberFormatException ignored) {}
+                            }
+                            try { Thread.sleep(waitMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                            continue;
+                        }
+                    } else {
+                        lastEx = new AiServiceException("Gemini API error (HTTP " + response.statusCode() + "): " + sanitize(response.body()));
+                        break;
+                    }
+                } catch (java.net.http.HttpTimeoutException te) {
+                    lastEx = new AiServiceException("Gemini model " + targetModel + " request timed out (" + te.getMessage() + ")");
+                    break;
+                } catch (AiServiceException e) {
+                    if (e.getMessage() != null && e.getMessage().contains("authentication failed")) {
+                        throw e; // Fail fast on authentication errors
+                    }
+                    lastEx = e;
+                    break;
+                } catch (Exception e) {
+                    lastEx = new AiServiceException("Network error connecting to Gemini API (" + targetModel + "): " + e.getMessage(), e);
+                    if (attempt < maxRetries) {
+                        try { Thread.sleep(1000L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                        continue;
+                    }
+                }
+            }
+        }
+
+        throw lastEx != null ? lastEx : new AiServiceException("Unable to connect to Gemini API");
+    }
+
+    private static boolean isRetired(String m) {
+        if (m == null) return false;
+        String lower = m.toLowerCase();
+        return lower.contains("1.5") || lower.contains("2.0") || lower.contains("2.5") || lower.equals("gemini-pro");
     }
 
     private String extractContent(String responseBody) throws AiServiceException {
+        if (responseBody == null || responseBody.isBlank()) {
+            throw new AiServiceException("Empty response body returned by Gemini API");
+        }
         int textIdx = responseBody.indexOf("\"text\":");
         if (textIdx < 0) {
             throw new AiServiceException("Unexpected Gemini response (no text part found): " + sanitize(responseBody));
@@ -117,7 +219,11 @@ public class GeminiLlmProvider implements LlmProvider {
                 sb.append(c);
             }
         }
-        return sb.toString();
+        String result = sb.toString().trim();
+        if (result.isEmpty()) {
+            throw new AiServiceException("Gemini returned empty text content");
+        }
+        return result;
     }
 
     private String sanitize(String s) {

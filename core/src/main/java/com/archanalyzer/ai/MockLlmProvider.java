@@ -12,6 +12,9 @@ public class MockLlmProvider implements LlmProvider {
     private Function<String, String> responder;
     private boolean shouldThrow = false;
     private String errorMessage = "Simulated provider error";
+    private java.util.List<ChatMessage> lastConversationHistory;
+    private String lastSystemPrompt;
+    private String lastUserPrompt;
 
     public MockLlmProvider() {
         this("MockProvider", "mock-model");
@@ -37,7 +40,32 @@ public class MockLlmProvider implements LlmProvider {
         if (shouldThrow) {
             throw new AiServiceException(errorMessage);
         }
+        this.lastSystemPrompt = systemPrompt;
+        this.lastUserPrompt = userPrompt;
         return responder.apply(userPrompt);
+    }
+
+    @Override
+    public String generateChatCompletion(String systemPrompt, java.util.List<ChatMessage> conversationHistory, String userPrompt) throws AiServiceException {
+        if (shouldThrow) {
+            throw new AiServiceException(errorMessage);
+        }
+        this.lastSystemPrompt = systemPrompt;
+        this.lastConversationHistory = conversationHistory;
+        this.lastUserPrompt = userPrompt;
+        return responder.apply(userPrompt);
+    }
+
+    public java.util.List<ChatMessage> getLastConversationHistory() {
+        return lastConversationHistory;
+    }
+
+    public String getLastSystemPrompt() {
+        return lastSystemPrompt;
+    }
+
+    public String getLastUserPrompt() {
+        return lastUserPrompt;
     }
 
     private String defaultResponse() {

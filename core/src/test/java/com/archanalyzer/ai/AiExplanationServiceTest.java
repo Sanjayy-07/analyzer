@@ -199,4 +199,173 @@ public class AiExplanationServiceTest {
         assertFalse(result.isAvailable());
         assertTrue(result.getErrorMessage().contains("Failed to parse AI response"));
     }
+
+    @Test
+    void testAskArchitectLiveGeminiSuccess() {
+        AiConfig config = new AiConfig("gemini", "AIzaSyFakeKeyForTest123", "", "gemini-3.5-flash", 90);
+        MockLlmProvider mockProvider = new MockLlmProvider("Google Gemini", "gemini-3.5-flash");
+        mockProvider.setCustomResponder(prompt -> "To decouple PaymentService from OrderService, introduce IPaymentService interface.");
+
+        AiExplanationService service = new AiExplanationService(config, mockProvider);
+        ArchitectChatResponse response = service.askArchitect(
+            "How should I decouple PaymentService?", List.of(), model, metrics, smells, List.of()
+        );
+
+        assertNotNull(response);
+        assertEquals("GEMINI", response.getSource());
+        assertEquals("CONNECTED", response.getStatus());
+        assertNull(response.getNotice());
+        assertTrue(response.isLiveAi());
+        assertTrue(response.getReply().contains("IPaymentService interface"));
+    }
+
+    @Test
+    void testAskArchitectUnconfiguredFallback() {
+        AiConfig config = AiConfig.disabled();
+        AiExplanationService service = new AiExplanationService(config);
+        metrics.cycleCount = 1;
+
+        ArchitectChatResponse response = service.askArchitect(
+            "How can I fix the circular dependency?", List.of(), model, metrics, smells, List.of()
+        );
+
+        assertNotNull(response);
+        assertEquals("OFFLINE", response.getSource());
+        assertEquals("UNCONFIGURED", response.getStatus());
+        assertFalse(response.isLiveAi());
+        assertNotNull(response.getNotice());
+        assertTrue(response.getNotice().contains("offline mode"));
+        assertTrue(response.getReply().contains("Extract Interface"));
+    }
+
+    @Test
+    void testAskArchitectAuthenticationFailureFallback() {
+        AiConfig config = new AiConfig("gemini", "AIzaSyInvalidKey123", "", "gemini-3.5-flash", 90);
+        MockLlmProvider mockProvider = new MockLlmProvider("Google Gemini", "gemini-3.5-flash");
+        mockProvider.setSimulateFailure(true, "Gemini authentication failed (HTTP 401): Invalid or unauthorized API key.");
+
+        AiExplanationService service = new AiExplanationService(config, mockProvider);
+        ArchitectChatResponse response = service.askArchitect(
+            "How can I safely modify the services?", List.of(), model, metrics, smells, List.of()
+        );
+
+        assertNotNull(response);
+        assertEquals("OFFLINE", response.getSource());
+        assertEquals("OFFLINE_FALLBACK", response.getStatus());
+        assertFalse(response.isLiveAi());
+        assertNotNull(response.getNotice());
+        assertTrue(response.getNotice().contains("authentication failed"));
+        assertTrue(response.getReply().contains("Presentation Layer"));
+    }
+
+    @Test
+    void testAskArchitectQuotaRateLimitFailureFallback() {
+        AiConfig config = new AiConfig("gemini", "AIzaSyRateLimitedKey", "", "gemini-3.5-flash", 90);
+        MockLlmProvider mockProvider = new MockLlmProvider("Google Gemini", "gemini-3.5-flash");
+        mockProvider.setSimulateFailure(true, "Gemini quota or rate limit exceeded (HTTP 429): Quota exceeded for quota metric");
+
+        AiExplanationService service = new AiExplanationService(config, mockProvider);
+        ArchitectChatResponse response = service.askArchitect(
+            "What refactoring changes will improve the architecture score most?", List.of(), model, metrics, smells, List.of()
+        );
+
+        assertNotNull(response);
+        assertEquals("OFFLINE", response.getSource());
+        assertEquals("OFFLINE_FALLBACK", response.getStatus());
+        assertFalse(response.isLiveAi());
+        assertNotNull(response.getNotice());
+        assertTrue(response.getNotice().contains("rate limit") || response.getNotice().contains("quota"));
+    }
+
+    @Test
+    void testAskArchitectTimeoutFailureFallback() {
+        AiConfig config = new AiConfig("gemini", "AIzaSyValidKey", "", "gemini-3.5-flash", 90);
+        MockLlmProvider mockProvider = new MockLlmProvider("Google Gemini", "gemini-3.5-flash");
+        mockProvider.setSimulateFailure(true, "Gemini model gemini-3.5-flash request timed out (request timed out)");
+
+        AiExplanationService service = new AiExplanationService(config, mockProvider);
+        ArchitectChatResponse response = service.askArchitect(
+            "How to improve architecture?", List.of(), model, metrics, smells, List.of()
+        );
+
+        assertNotNull(response);
+        assertEquals("OFFLINE", response.getSource());
+        assertEquals("OFFLINE_FALLBACK", response.getStatus());
+        assertNotNull(response.getNotice());
+        assertTrue(response.getNotice().contains("timed out"));
+    }
+
+    @Test
+    void testAskArchitectServiceUnavailable503Fallback() {
+        AiConfig config = new AiConfig("gemini", "AIzaSyValidKey", "", "gemini-3.5-flash", 90);
+        MockLlmProvider mockProvider = new MockLlmProvider("Google Gemini", "gemini-3.5-flash");
+        mockProvider.setSimulateFailure(true, "Gemini model gemini-3.5-flash unavailable (HTTP 503): High demand spike");
+
+        AiExplanationService service = new AiExplanationService(config, mockProvider);
+        ArchitectChatResponse response = service.askArchitect(
+            "How to improve architecture?", List.of(), model, metrics, smells, List.of()
+        );
+
+        assertNotNull(response);
+        assertEquals("OFFLINE", response.getSource());
+        assertEquals("OFFLINE_FALLBACK", response.getStatus());
+        assertNotNull(response.getNotice());
+        assertTrue(response.getNotice().contains("503") || response.getNotice().contains("high demand"));
+    }
+
+    @Test
+    void testAskArchitectEmptyResponseFallback() {
+        AiConfig config = new AiConfig("gemini", "AIzaSyValidKey", "", "gemini-3.5-flash", 90);
+        MockLlmProvider mockProvider = new MockLlmProvider("Google Gemini", "gemini-3.5-flash");
+        mockProvider.setSimulateFailure(true, "Gemini returned empty text content");
+
+        AiExplanationService service = new AiExplanationService(config, mockProvider);
+        ArchitectChatResponse response = service.askArchitect(
+            "How to improve architecture?", List.of(), model, metrics, smells, List.of()
+        );
+
+        assertNotNull(response);
+        assertEquals("OFFLINE", response.getSource());
+        assertEquals("OFFLINE_FALLBACK", response.getStatus());
+        assertNotNull(response.getNotice());
+        assertTrue(response.getNotice().contains("empty response"));
+    }
+
+    @Test
+    void testRetiredModelNormalizationInConfig() {
+        AiConfig config1 = new AiConfig("gemini", "AIzaSyTest", "", "gemini-1.5-flash", 90);
+        assertEquals("gemini-3.5-flash", config1.getModel());
+
+        AiConfig config2 = new AiConfig("gemini", "AIzaSyTest", "", "gemini-2.0-flash", 90);
+        assertEquals("gemini-3.5-flash", config2.getModel());
+
+        AiConfig config3 = new AiConfig("gemini", "AIzaSyTest", "", "gemini-2.5-flash", 90);
+        assertEquals("gemini-3.5-flash", config3.getModel());
+    }
+
+    @Test
+    void testAskArchitectPreservesConversationHistory() {
+        AiConfig config = new AiConfig("gemini", "AIzaSyValidKey", "", "gemini-3.5-flash", 90);
+        MockLlmProvider mockProvider = new MockLlmProvider("Google Gemini", "gemini-3.5-flash");
+        mockProvider.setCustomResponder(prompt -> "Here is the implementation of IPaymentService.");
+
+        List<ChatMessage> history = List.of(
+            new ChatMessage("user", "How do I decouple PaymentService?"),
+            new ChatMessage("assistant", "You can extract an interface named IPaymentService.")
+        );
+
+        AiExplanationService service = new AiExplanationService(config, mockProvider);
+        ArchitectChatResponse response = service.askArchitect(
+            "Can you write the Java code for that interface?", history, model, metrics, smells, List.of()
+        );
+
+        assertNotNull(response);
+        assertEquals("GEMINI", response.getSource());
+        assertEquals(2, mockProvider.getLastConversationHistory().size());
+        assertEquals("user", mockProvider.getLastConversationHistory().get(0).role());
+        assertEquals("How do I decouple PaymentService?", mockProvider.getLastConversationHistory().get(0).content());
+        assertEquals("assistant", mockProvider.getLastConversationHistory().get(1).role());
+        assertEquals("You can extract an interface named IPaymentService.", mockProvider.getLastConversationHistory().get(1).content());
+        assertEquals("Can you write the Java code for that interface?", mockProvider.getLastUserPrompt());
+    }
 }

@@ -118,15 +118,28 @@ public class AnalysisApiServlet extends HttpServlet {
                             "implementationPlan", r.getImplementationPlan(),
                             "validationRequirements", r.getValidationRequirements()
                         )).toList();
+                } else if ("status".equalsIgnoreCase(subresource)) {
+                    com.archanalyzer.ai.AiConfig cfg = com.archanalyzer.ai.AiConfig.loadFromEnvironment();
+                    Map<String, Object> statMap = new LinkedHashMap<>();
+                    statMap.put("configured", cfg.isConfigured());
+                    statMap.put("provider", cfg.getProvider());
+                    statMap.put("model", cfg.getModel());
+                    statMap.put("status", cfg.isConfigured() ? "READY" : "UNCONFIGURED");
+                    yield statMap;
                 } else {
-                    yield Map.of(
-                        "status", result.aiResult.getStatus().name(),
-                        "provider", result.aiResult.getProvider(),
-                        "model", result.aiResult.getModel(),
-                        "message", result.aiResult.getMessage(),
-                        "explanationCount", result.aiResult.getExplanations().size(),
-                        "recommendationCount", result.aiResult.getRecommendations().size()
-                    );
+                    Map<String, Object> aiMap = new LinkedHashMap<>();
+                    aiMap.put("status", result.aiResult.getStatus().name());
+                    aiMap.put("provider", result.aiResult.getProvider());
+                    aiMap.put("model", result.aiResult.getModel());
+                    aiMap.put("message", result.aiResult.getMessage());
+                    aiMap.put("architecturePattern", result.aiResult.getArchitecturePattern());
+                    aiMap.put("plainEnglishOverview", result.aiResult.getPlainEnglishOverview());
+                    aiMap.put("applicationFlowSteps", result.aiResult.getApplicationFlowSteps());
+                    aiMap.put("detectedTechStack", result.aiResult.getDetectedTechStack());
+                    aiMap.put("maintainabilitySummary", result.aiResult.getMaintainabilitySummary());
+                    aiMap.put("explanationCount", result.aiResult.getExplanations().size());
+                    aiMap.put("recommendationCount", result.aiResult.getRecommendations().size());
+                    yield aiMap;
                 }
             }
             default -> null;
@@ -138,5 +151,109 @@ public class AnalysisApiServlet extends HttpServlet {
             return;
         }
         resp.getWriter().write(JsonUtil.toJson(payload));
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        resp.setContentType("application/json;charset=UTF-8");
+
+        HttpSession session = req.getSession(false);
+        AnalyzerPipeline.PipelineResult result = session != null
+            ? (AnalyzerPipeline.PipelineResult) session.getAttribute("lastPipelineResult") : null;
+
+        if (result == null) {
+            resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            resp.getWriter().write(JsonUtil.toJson(Map.of("error", "No analysis found in the current session.")));
+            return;
+        }
+
+        String pathInfo = req.getPathInfo();
+        if (pathInfo != null && pathInfo.contains("/chat")) {
+            String message = req.getParameter("message");
+            if (message == null || message.isBlank()) {
+                try {
+                    String body = new String(req.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                    if (body.contains("\"message\":")) {
+                        message = extractJsonValue(body, "message");
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            if (message == null || message.isBlank()) {
+                resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                resp.getWriter().write(JsonUtil.toJson(Map.of("error", "Message cannot be empty.")));
+                return;
+            }
+
+            try {
+                String projectKey = "aiChatHistory_" + (result.model != null && result.model.getProjectName() != null ? result.model.getProjectName() : "default");
+                @SuppressWarnings("unchecked")
+                List<com.archanalyzer.ai.ChatMessage> history = (List<com.archanalyzer.ai.ChatMessage>) session.getAttribute(projectKey);
+                if (history == null) {
+                    history = new ArrayList<>();
+                }
+
+                com.archanalyzer.ai.AiExplanationService aiService = new com.archanalyzer.ai.AiExplanationService();
+                com.archanalyzer.ai.ArchitectChatResponse chatResp = aiService.askArchitect(
+                    message, history, result.model, result.metricsBefore, result.smells, result.riskPredictions
+                );
+
+                history.add(new com.archanalyzer.ai.ChatMessage("user", message));
+                history.add(new com.archanalyzer.ai.ChatMessage("assistant", chatResp.getReply()));
+                while (history.size() > 10) {
+                    history.remove(0);
+                }
+                session.setAttribute(projectKey, history);
+
+                Map<String, Object> respMap = new LinkedHashMap<>();
+                respMap.put("success", true);
+                respMap.put("reply", chatResp.getReply());
+                respMap.put("source", chatResp.getSource());
+                respMap.put("status", chatResp.getStatus());
+                respMap.put("notice", chatResp.getNotice());
+                respMap.put("historyLength", history.size());
+                resp.getWriter().write(JsonUtil.toJson(respMap));
+            } catch (Exception e) {
+                resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                resp.getWriter().write(JsonUtil.toJson(Map.of("error", "AI assistant error: " + e.getMessage())));
+            }
+            return;
+        }
+
+        if (pathInfo != null && pathInfo.contains("/ai")) {
+            try {
+                com.archanalyzer.ai.AiExplanationService aiService = new com.archanalyzer.ai.AiExplanationService();
+                result.aiResult = aiService.analyzeArchitecture(result.model, result.metricsBefore, result.smells, result.riskPredictions);
+
+                Map<String, Object> respMap = new LinkedHashMap<>();
+                respMap.put("success", result.aiResult.getStatus() == com.archanalyzer.ai.AiAnalysisResult.Status.LIVE_SUCCESS);
+                respMap.put("status", result.aiResult.getStatus().name());
+                respMap.put("provider", result.aiResult.getProvider());
+                respMap.put("model", result.aiResult.getModel());
+                respMap.put("message", result.aiResult.getMessage());
+                respMap.put("architecturePattern", result.aiResult.getArchitecturePattern());
+                respMap.put("plainEnglishOverview", result.aiResult.getPlainEnglishOverview());
+                respMap.put("explanationCount", result.aiResult.getExplanations().size());
+                respMap.put("recommendationCount", result.aiResult.getRecommendations().size());
+
+                resp.getWriter().write(JsonUtil.toJson(respMap));
+            } catch (Exception e) {
+                resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                resp.getWriter().write(JsonUtil.toJson(Map.of("error", "AI generation failed: " + e.getMessage())));
+            }
+            return;
+        }
+
+        resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
+        resp.getWriter().write(JsonUtil.toJson(Map.of("error", "Unknown endpoint: " + pathInfo)));
+    }
+
+    private String extractJsonValue(String json, String key) {
+        String pattern = "\"" + key + "\":\"";
+        int idx = json.indexOf(pattern);
+        if (idx < 0) return "";
+        int start = idx + pattern.length();
+        int end = json.indexOf('"', start);
+        return end > start ? json.substring(start, end).trim() : "";
     }
 }
